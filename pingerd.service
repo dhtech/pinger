@@ -1,0 +1,13 @@
+[Unit]
+Description=ICMP pinger
+After=network.target
+
+[Service]
+Type=simple
+# Root for ICMP
+User=root
+ExecStart=/opt/pinger/pingerd
+
+[Install]
+WantedBy=multi-user.target
+

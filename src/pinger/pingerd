@@ -26,7 +26,7 @@ def transmit(interval, hosts, sockfd):
   while True:
     db = sqlite3.connect('/etc/ipplan.db')
     cursor = db.cursor()
-    sql = ("SELECT name, ipv4_addr_txt FROM host")
+    sql = ("SELECT name, ipv4_addr_txt FROM host WHERE ipv4_addr_txt != NULL")
 
     # Mark current time as the datapoint time
     timestamp = int(time.time())
