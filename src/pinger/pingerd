@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env -S python2 -u
 
 import argparse
 import dhmonpinger
@@ -26,13 +26,13 @@ def transmit(interval, hosts, sockfd):
   while True:
     db = sqlite3.connect('/etc/ipplan.db')
     cursor = db.cursor()
-    sql = ("SELECT name, ipv4_addr_txt FROM host WHERE ipv4_addr_txt != NULL")
+    sql = ("SELECT name, ipv4_addr_txt FROM host WHERE ipv4_addr_txt IS NOT NULL")
 
     # Mark current time as the datapoint time
     timestamp = int(time.time())
     hosts.update({ipv4: host for host, ipv4 in cursor.execute(sql).fetchall()})
 
-    print '[%s]: Pinging' % timestamp
+    print '[%s]: Pinging %d hosts' % (timestamp, len(hosts))
     for ip in hosts:
       dhmonpinger.transmit(sockfd, ip, timestamp)
     db.close()
