@@ -224,6 +224,14 @@ static PyMethodDef module_funcs[] = {
 };
 
 
-void initdhmonpinger(void) {
-  Py_InitModule3("dhmonpinger", module_funcs, "ICMP functions for dhmon");
+static struct PyModuleDef Dhmonpinger = {
+  PyModuleDef_HEAD_INIT,
+  "dhmonpinger",
+  "ICMP functions for dhmon",
+  -1,
+  module_funcs
+};
+
+PyMODINIT_FUNC PyInit_dhmonpinger(void) {
+  return PyModule_Create(&Dhmonpinger);
 }

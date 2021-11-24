@@ -1,4 +1,4 @@
-#!/usr/bin/env -S python2 -u
+#!/usr/bin/env -S python3 -u
 
 import argparse
 import dhmonpinger
@@ -32,7 +32,7 @@ def transmit(interval, hosts, sockfd):
     timestamp = int(time.time())
     hosts.update({ipv4: host for host, ipv4 in cursor.execute(sql).fetchall()})
 
-    print '[%s]: Pinging %d hosts' % (timestamp, len(hosts))
+    print('[%s]: Pinging %d hosts' % (timestamp, len(hosts)))
     for ip in hosts:
       dhmonpinger.transmit(sockfd, ip, timestamp)
     db.close()
