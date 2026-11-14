@@ -1,6 +1,7 @@
 /*
   *Stateless pinger for dhmon.
  */
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -49,12 +50,12 @@ static uint16_t in_cksum(void *ptr, size_t len)
 }
 
 
-static PyObject *transmit(PyObject *self, PyObject *args) {
+static PyObject *transmit(PyObject *Py_UNUSED(self), PyObject *args) {
   icmp_t packet;
   struct sockaddr_in targetaddr;
   struct timeval timestamp;
-  uint64_t user;
-  size_t sent;
+  unsigned long long user = 0;
+  ssize_t sent;
   int sockfd;
   const char *textaddr;
 
@@ -71,7 +72,7 @@ static PyObject *transmit(PyObject *self, PyObject *args) {
   packet.icmp.checksum = htons(PINGER_ICMP_CHKSUM);
   packet.payload.magic = htonl(PINGER_MAGIC);
 
-  if (!PyArg_ParseTuple(args, "isi", &sockfd, &textaddr, &user)) {
+  if (!PyArg_ParseTuple(args, "isK", &sockfd, &textaddr, &user)) {
     return NULL;
   }
 
@@ -103,7 +104,7 @@ static PyObject *transmit(PyObject *self, PyObject *args) {
 }
 
 
-static PyObject *receive(PyObject *self, PyObject *args) {
+static PyObject *receive(PyObject *Py_UNUSED(self), PyObject *args) {
   char ip[16];
   uint8_t control[PINGER_CONTROL_SIZE];
   icmp_t packet;
@@ -112,7 +113,7 @@ static PyObject *receive(PyObject *self, PyObject *args) {
   struct iovec entry;
   struct sockaddr_in from_addr;
   struct timeval *stamp;
-  int res;
+  ssize_t res;
   int sockfd;
 
   if (!PyArg_ParseTuple(args, "i", &sockfd)) {
@@ -120,9 +121,10 @@ static PyObject *receive(PyObject *self, PyObject *args) {
   }
 
   for(;;) {
-    uint64_t user;
+    unsigned long long user;
     int secs;
     int usecs;
+    int err;
 
     memset(&msg, 0, sizeof(msg));
     msg.msg_iov = &entry;
@@ -136,13 +138,20 @@ static PyObject *receive(PyObject *self, PyObject *args) {
 
     Py_BEGIN_ALLOW_THREADS;
     res = recvmsg(sockfd, &msg, 0);
+    err = errno;
+    Py_END_ALLOW_THREADS;
     if (res < 0) {
+      if (err == EINTR) {
+        if (PyErr_CheckSignals() < 0)
+          return NULL;
+        continue;
+      }
+      errno = err;
       return PyErr_SetFromErrno(PyExc_IOError);
     }
-    Py_END_ALLOW_THREADS;
 
     /* Check that we actually sent this packet. */
-    if (res != sizeof(packet)) {
+    if ((size_t)res != sizeof(packet)) {
       continue;
     }
     if (packet.payload.magic != htonl(PINGER_MAGIC)) {
@@ -176,12 +185,13 @@ static PyObject *receive(PyObject *self, PyObject *args) {
     if (inet_ntop(AF_INET, &from_addr.sin_addr, ip, sizeof(ip)) == NULL)
       return PyErr_Format(PyExc_IOError, "inet_ntop failed for IP");
 
-    return Py_BuildValue("siii", ip, user, secs, usecs);
+    return Py_BuildValue("sKii", ip, user, secs, usecs);
   }
 }
 
 
-static PyObject *create_socket(PyObject *self, PyObject *unused_args) {
+static PyObject *create_socket(PyObject *Py_UNUSED(self),
+                               PyObject *Py_UNUSED(args)) {
   struct icmp_filter filt;
   int enable = 1;
   int rcvbuf = PINGER_RCVBUF;
@@ -229,7 +239,8 @@ static struct PyModuleDef Dhmonpinger = {
   "dhmonpinger",
   "ICMP functions for dhmon",
   -1,
-  module_funcs
+  module_funcs,
+  NULL, NULL, NULL, NULL
 };
 
 PyMODINIT_FUNC PyInit_dhmonpinger(void) {

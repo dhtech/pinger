@@ -22,20 +22,38 @@ DEFAULT_ICMP_BUCKETS=(
 icmp_rtt = None
 
 
+def plan_hosts():
+  """{IPv4 address: name} of the plan's hosts that have an address."""
+  db = sqlite3.connect('/etc/ipplan.db')
+  try:
+    sql = ("SELECT name, ipv4_addr_txt FROM host WHERE ipv4_addr_txt IS NOT NULL")
+    return {ipv4: host for host, ipv4 in db.execute(sql).fetchall()}
+  finally:
+    db.close()
+
+
 def transmit(interval, hosts, sockfd):
   while True:
-    db = sqlite3.connect('/etc/ipplan.db')
-    cursor = db.cursor()
-    sql = ("SELECT name, ipv4_addr_txt FROM host WHERE ipv4_addr_txt IS NOT NULL")
-
     # Mark current time as the datapoint time
     timestamp = int(time.time())
-    hosts.update({ipv4: host for host, ipv4 in cursor.execute(sql).fetchall()})
+    try:
+      hosts.update(plan_hosts())
+    except sqlite3.Error as error:
+      # a plan that cannot be read this round (it is being replaced,
+      # say): the hosts known so far are pinged, and it is read again
+      # next round
+      print('[%s]: the plan could not be read: %s' % (timestamp, error))
 
     print('[%s]: Pinging %d hosts' % (timestamp, len(hosts)))
-    for ip in hosts:
-      dhmonpinger.transmit(sockfd, ip, timestamp)
-    db.close()
+    unsent = 0
+    for ip in list(hosts):
+      try:
+        dhmonpinger.transmit(sockfd, ip, timestamp)
+      except OSError:
+        # no route to it, or not an address: the others are pinged
+        unsent += 1
+    if unsent:
+      print('[%s]: %d hosts could not be sent to' % (timestamp, unsent))
     time.sleep(interval)
 
 
@@ -64,7 +82,12 @@ def main(port, interval):
   # TODO(bluecmd): Make this an iterator
   while True:
     ip, timestamp, secs, usecs = dhmonpinger.receive(sockfd)
-    icmp_rtt.labels(hosts[ip]).observe(
+    host = hosts.get(ip)
+    if host is None:
+      # an answer from an address we never pinged (a device answering
+      # from another of its addresses): nothing to count it for
+      continue
+    icmp_rtt.labels(host).observe(
         float(secs*1000000 + usecs)/10**6)
 
 if __name__ == '__main__':

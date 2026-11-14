@@ -26,8 +26,9 @@ signal.alarm(20)
 
 sock = dhmonpinger.create_socket()
 for n in range(ROUNDS):
-    # what pingerd sends along: the time of the round, in seconds
-    stamp = int(time.time())
+    # what pingerd sends along: the time of the round, in seconds -
+    # and once a number that needs all 64 bits of the field
+    stamp = int(time.time()) if n else 2**64 - 2
     dhmonpinger.transmit(sock, '127.0.0.1', stamp)
     ip, user, secs, usecs = dhmonpinger.receive(sock)
     assert ip == '127.0.0.1', ip
