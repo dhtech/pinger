@@ -18,11 +18,36 @@ took, for Prometheus.
   (label `host`), on `http://<server>:13110/metrics` (`--port`). A host
   that does not answer simply gets no new observations: compare
   `icmp_rtt_seconds_count` over time.
-- **Rights:** it starts as root, opens one raw ICMP socket, raises its
-  priority and then continues as `nobody`.
+- **Rights:** it starts as root and continues as `nobody` - see
+  "Privileges" below.
 
 The sending and receiving is a small C module, `dhmonpinger`
 (`src/pinger/dhmonpinger.c`); the daemon is `src/pinger/pingerd`.
+
+## Privileges
+
+`pingerd` must be started as root, and is root only while it starts:
+
+1. as root it opens the one raw ICMP socket, sets that socket's
+   receive buffer (see below) and raises its own priority (nice -15);
+2. then it changes to the group `nogroup` and the user `nobody`. With
+   that it also loses every capability; the socket, already open,
+   keeps working.
+
+Everything else is done as `nobody`: reading the plan database,
+sending the pings, receiving the answers, and the web server on port
+13110. `/etc/ipplan.db` must therefore be readable by everyone.
+
+Two things it does not do:
+
+- It does not clear root's supplementary groups. Started by systemd
+  there are none (a root service carries none on Debian); started by
+  hand from a root shell, it keeps the groups of that shell.
+- It has no account of its own: it shares `nobody` with whatever else
+  runs as that user on the machine.
+
+Every package is tried for this before it is released: the running
+daemon's user must be `nobody` (`.github/try.sh`).
 
 ## The receive buffer
 
