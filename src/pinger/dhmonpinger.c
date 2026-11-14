@@ -204,11 +204,17 @@ static PyObject *create_socket(PyObject *Py_UNUSED(self),
         sockfd, SOL_SOCKET, SO_TIMESTAMP, &enable, sizeof(enable)) < 0)
     return PyErr_SetFromErrno(PyExc_IOError);
 
-  /* This requires changing net.core.rmem_max, but is needed to not drop
-   * ICMP replies. */
+  /* The answers of a whole round arrive at once; a large receive buffer
+   * is needed to not drop ICMP replies. With CAP_NET_ADMIN (root, as the
+   * unit starts pingerd) the size is forced. Without it the kernel
+   * silently cuts the size down to net.core.rmem_max: receive_buffer()
+   * says what the socket really got. */
   if (setsockopt(
-        sockfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0)
-    return PyErr_SetFromErrno(PyExc_IOError);
+        sockfd, SOL_SOCKET, SO_RCVBUFFORCE, &rcvbuf, sizeof(rcvbuf)) < 0) {
+    if (setsockopt(
+          sockfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0)
+      return PyErr_SetFromErrno(PyExc_IOError);
+  }
 
   if (setsockopt(
         sockfd, IPPROTO_IP, IP_HDRINCL, &enable, sizeof(enable)) < 0)
@@ -223,6 +229,21 @@ static PyObject *create_socket(PyObject *Py_UNUSED(self),
 }
 
 
+static PyObject *receive_buffer(PyObject *Py_UNUSED(self), PyObject *args) {
+  int sockfd;
+  int size = 0;
+  socklen_t len = sizeof(size);
+
+  if (!PyArg_ParseTuple(args, "i", &sockfd)) {
+    return NULL;
+  }
+  if (getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &size, &len) < 0)
+    return PyErr_SetFromErrno(PyExc_IOError);
+
+  return Py_BuildValue("i", size);
+}
+
+
 static PyMethodDef module_funcs[] = {
   { "transmit", transmit, METH_VARARGS,
     "Send out an ICMP Ping Request for a given IPv4." },
@@ -230,6 +251,9 @@ static PyMethodDef module_funcs[] = {
     "Receive one ICMP Ping Reply." },
   { "create_socket", create_socket, METH_NOARGS,
     "Create a new ICMP socket, must be run as root." },
+  { "receive_buffer", receive_buffer, METH_VARARGS,
+    "The socket's receive buffer in bytes, as the kernel counts it: "
+    "twice RCVBUF when it got what create_socket() asked for." },
   { NULL, NULL, 0, NULL }
 };
 
@@ -244,5 +268,14 @@ static struct PyModuleDef Dhmonpinger = {
 };
 
 PyMODINIT_FUNC PyInit_dhmonpinger(void) {
-  return PyModule_Create(&Dhmonpinger);
+  PyObject *module = PyModule_Create(&Dhmonpinger);
+
+  if (module == NULL)
+    return NULL;
+  /* the receive buffer create_socket() asks for */
+  if (PyModule_AddIntConstant(module, "RCVBUF", PINGER_RCVBUF) < 0) {
+    Py_DECREF(module);
+    return NULL;
+  }
+  return module;
 }

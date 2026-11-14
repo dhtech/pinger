@@ -10,6 +10,7 @@ your own:
 
   unshare -r -n sh -c 'ip link set lo up && python3 tests/loopback.py DIR'
 """
+import os
 import signal
 import sys
 import time
@@ -25,6 +26,22 @@ ROUNDS = 5
 signal.alarm(20)
 
 sock = dhmonpinger.create_socket()
+
+# the receive buffer: with CAP_NET_ADMIN it is what the module asks
+# for, whatever net.core.rmem_max says (PINGER_FULL_BUFFER=1 demands
+# that); without, the kernel may have cut it down
+wanted = 2 * dhmonpinger.RCVBUF
+got = dhmonpinger.receive_buffer(sock)
+try:
+    with open('/proc/sys/net/core/rmem_max') as handle:
+        limit = handle.read().strip()
+except OSError:
+    limit = 'unknown'
+print('receive buffer: %d bytes (asked for %d; net.core.rmem_max is %s)'
+      % (got, wanted, limit))
+assert 0 < got <= wanted, got
+if os.environ.get('PINGER_FULL_BUFFER') == '1':
+    assert got == wanted, 'the buffer was not forced'
 for n in range(ROUNDS):
     # what pingerd sends along: the time of the round, in seconds -
     # and once a number that needs all 64 bits of the field

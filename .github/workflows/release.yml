@@ -38,6 +38,7 @@ jobs:
       - name: Install and try it on a machine without a compiler
         run: >
           docker run --rm --cap-add NET_RAW --cap-add SYS_NICE
+          --cap-add NET_ADMIN -e PINGER_FULL_BUFFER=1
           -v "$PWD:/src:ro" -w /src debian:13
           sh .github/try.sh
 

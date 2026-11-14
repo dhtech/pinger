@@ -74,6 +74,16 @@ def transmit(interval, hosts, sockfd, database, sites):
 def main(port, interval, database='/etc/ipplan.db', sites=()):
   sockfd = dhmonpinger.create_socket()
 
+  # The answers of a round arrive all at once and wait in the socket's
+  # receive buffer. The kernel counts a buffer double.
+  wanted = 2 * dhmonpinger.RCVBUF
+  got = dhmonpinger.receive_buffer(sockfd)
+  if got < wanted:
+    print('WARNING: the receive buffer is %d bytes, not the %d asked for: '
+          'with many hosts, answers are lost. Start pingerd with '
+          'CAP_NET_ADMIN (as root), or set net.core.rmem_max to %d or '
+          'more.' % (got, wanted, dhmonpinger.RCVBUF))
+
   os.nice(-15)
 
   # Drop root privileges now when the socket is open

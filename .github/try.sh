@@ -4,10 +4,15 @@
 # nothing of the build in it:
 #
 #   docker run --rm --cap-add NET_RAW --cap-add SYS_NICE \
-#       -v "$PWD:/src" -w /src debian:13 sh .github/try.sh
+#       --cap-add NET_ADMIN -e PINGER_FULL_BUFFER=1 \
+#       -v "$PWD:/src:ro" -w /src debian:13 sh .github/try.sh
 #
 # (NET_RAW: the raw ICMP socket. SYS_NICE: pingerd raises its own
-# priority when it starts.)
+# priority when it starts. NET_ADMIN: the socket's receive buffer is
+# forced past net.core.rmem_max, as it is for root on a server -
+# PINGER_FULL_BUFFER=1 demands that it was, and that pingerd did not
+# warn about a short one. Leave both out where NET_ADMIN cannot be
+# had, as in a rootless container.)
 #
 # The package installs with apt, which fetches what it depends on; the
 # module pings 127.0.0.1; pingerd, started as the unit starts it, reads
@@ -48,12 +53,18 @@ cp /etc/ipplan.db /tmp/plan.db
 grep -xF 'ExecStart=/usr/sbin/pingerd' /usr/lib/systemd/system/pingerd.service
 
 # as the unit starts it - no switches: every host of the plan
-/usr/sbin/pingerd --port 13110 --interval 0.5 &
+/usr/sbin/pingerd --port 13110 --interval 0.5 > /tmp/pingerd.log 2>&1 &
 daemon=$!
 stop() { kill "$daemon" 2>/dev/null || true; }
 python3 -B tests/measured.py 13110 \
     --counted a.here.test b.there.test \
-    --never no-address.here.test || { stop; exit 1; }
+    --never no-address.here.test || { stop; cat /tmp/pingerd.log; exit 1; }
+head -5 /tmp/pingerd.log
+if [ "${PINGER_FULL_BUFFER:-}" = 1 ] && grep WARNING /tmp/pingerd.log; then
+    echo "pingerd warns about its receive buffer where it could force it"
+    stop
+    exit 1
+fi
 # it gave up root once the socket was open
 uid=$(awk '/^Uid:/ {print $2}' "/proc/$daemon/status")
 echo "pingerd runs as uid $uid (nobody is $(id -u nobody))"

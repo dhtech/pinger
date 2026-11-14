@@ -24,6 +24,25 @@ took, for Prometheus.
 The sending and receiving is a small C module, `dhmonpinger`
 (`src/pinger/dhmonpinger.c`); the daemon is `src/pinger/pingerd`.
 
+## The receive buffer
+
+The answers of a round arrive all at once and wait in the socket's
+receive buffer until `pingerd` has read them; what does not fit is
+lost, and looks like hosts that did not answer. The module therefore
+asks for a large buffer (3670016 bytes, which the kernel counts as
+twice that).
+
+- Started as root - as the unit does - `pingerd` gets that buffer
+  whatever the kernel's limit is (it has `CAP_NET_ADMIN` and forces
+  the size). Nothing needs to be set.
+- Started without `CAP_NET_ADMIN` (in a container, say), the kernel
+  silently cuts the buffer down to `net.core.rmem_max` - 212992 on a
+  stock Debian 13, a seventeenth of what is asked for. `pingerd` says
+  so when it starts (`WARNING: the receive buffer is ...`). Then raise
+  the limit, in `/etc/sysctl.d/`:
+
+      net.core.rmem_max = 8388608
+
 ## Running it
 
 A release is a Debian package, built for Debian 13 - nothing is
@@ -61,11 +80,14 @@ measured, as `nobody`, and the package is removed again.
 
     docker run --rm -v "$PWD:/src" -w /src debian:13 sh .github/build.sh
     docker run --rm --cap-add NET_RAW --cap-add SYS_NICE \
+        --cap-add NET_ADMIN -e PINGER_FULL_BUFFER=1 \
         -v "$PWD:/src:ro" -w /src debian:13 sh .github/try.sh
 
 The first leaves the package in `dist/`. (With rootless podman the
-second stops where `pingerd` raises its priority: that needs real
-root.) The old `src/pinger/Makefile` (build and install straight onto
-the machine it runs on, under `/opt/pinger`) is unchanged, and so is
+second stops where `pingerd` raises its priority, and the buffer
+cannot be forced: both need real root.)
+
+The old `src/pinger/Makefile` (build and install straight onto the
+machine it runs on, under `/opt/pinger`) is unchanged, and so is
 `pingerd.service` in the repository, which names that path; the
 package's unit names `/usr/sbin/pingerd`.

@@ -3,5 +3,5 @@
 # (.github/workflows/release.yml).
 from setuptools import setup, Extension
 
-setup(name='dhmonpinger', version='0.2.0', ext_modules=[
+setup(name='dhmonpinger', version='0.2.1', ext_modules=[
     Extension('dhmonpinger', ['dhmonpinger.c'])])
