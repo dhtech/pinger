@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+# A first installation starts nothing: pingerd needs /etc/ipplan.db, and
+# whoever installs the package decides when it runs. On an upgrade, a
+# pingerd that is running continues as the new version.
+if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl try-restart pingerd.service || true
+fi
+exit 0

@@ -1,0 +1,49 @@
+name: release
+
+# Pushing a tag vX.Y.Z builds pinger as a Debian package on Debian 13,
+# for Debian 13's own Python (.github/build.sh), installs and tries it
+# in a new container that has only the package (.github/try.sh), and
+# publishes on a GitHub release:
+#
+#   pinger_X.Y.Z_amd64.deb   pingerd, its compiled module and the unit
+#   SHA256SUMS
+#
+# so that no server needs a compiler.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, try and publish for Debian 13
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'dhtech'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The tag is the version in the source
+        run: |
+          version=$(sed -n "s/.*version='\([^']*\)'.*/\1/p" src/pinger/setup.py)
+          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME}, but src/pinger/setup.py says version ${version}"; exit 1; }
+
+      - name: Build the package
+        run: >
+          docker run --rm -v "$PWD:/src" -w /src debian:13
+          sh .github/build.sh
+
+      - name: Install and try it on a machine without a compiler
+        run: >
+          docker run --rm --cap-add NET_RAW --cap-add SYS_NICE
+          -v "$PWD:/src:ro" -w /src debian:13
+          sh .github/try.sh
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${GITHUB_REF_NAME}" dist/*
+          --title "${GITHUB_REF_NAME}" --generate-notes

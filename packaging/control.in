@@ -1,0 +1,16 @@
+Package: pinger
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: dhtech <dhtech@users.noreply.github.com>
+Installed-Size: @SIZE@
+Depends: python3 (>= @PYTHON@~), python3 (<< @PYTHON_NEXT@), python3-prometheus-client, libc6 (>= @GLIBC@)
+Section: net
+Priority: optional
+Homepage: https://github.com/dhtech/pinger
+Description: ICMP pinger for Prometheus (pingerd)
+ pingerd pings every host of the IP plan (/etc/ipplan.db) that has an
+ IPv4 address, once a second, and serves how long the answers took as
+ the histogram icmp_rtt_seconds on port 13110.
+ .
+ The unit pingerd.service is installed; a first installation neither
+ enables nor starts it.
