@@ -12,7 +12,8 @@
 # The package installs with apt, which fetches what it depends on; the
 # module pings 127.0.0.1; pingerd, started as the unit starts it, reads
 # its hosts from the plan's database and answers on its web port with
-# what it measured, as "nobody"; and the package can be removed again.
+# what it measured, as "nobody"; with --site it measures that site's
+# hosts only; and the package can be removed again.
 set -eu
 
 export DEBIAN_FRONTEND=noninteractive
@@ -28,48 +29,44 @@ fi
 # 1. the installed module pings
 python3 -B tests/loopback.py
 
-# 2. pingerd
+# 2. pingerd. A plan with two sites; every address in it is this
+#    machine's own (all of 127/8 answers).
 python3 - <<'EOF'
 import sqlite3
 db = sqlite3.connect('/etc/ipplan.db')
-db.execute('CREATE TABLE host (name TEXT, ipv4_addr_txt TEXT)')
-db.execute("INSERT INTO host VALUES ('loopback.test', '127.0.0.1')")
-db.execute("INSERT INTO host VALUES ('no-address.test', NULL)")
+db.execute('CREATE TABLE network (node_id INTEGER, name TEXT)')
+db.execute('CREATE TABLE host (node_id INTEGER, name TEXT, '
+           'ipv4_addr_txt TEXT, network_id INTEGER)')
+db.execute("INSERT INTO network VALUES (1, 'HERE@SERVERS')")
+db.execute("INSERT INTO network VALUES (2, 'THERE@SERVERS')")
+db.execute("INSERT INTO host VALUES (11, 'a.here.test', '127.0.0.1', 1)")
+db.execute("INSERT INTO host VALUES (12, 'b.there.test', '127.0.0.2', 2)")
+db.execute("INSERT INTO host VALUES (13, 'no-address.here.test', NULL, 1)")
 db.commit()
 EOF
+cp /etc/ipplan.db /tmp/plan.db
 grep -xF 'ExecStart=/usr/sbin/pingerd' /usr/lib/systemd/system/pingerd.service
+
+# as the unit starts it - no switches: every host of the plan
 /usr/sbin/pingerd --port 13110 --interval 0.5 &
 daemon=$!
 stop() { kill "$daemon" 2>/dev/null || true; }
-python3 - <<'EOF' || { stop; exit 1; }
-import re
-import sys
-import time
-import urllib.request
-
-wanted = re.compile(
-    r'^icmp_rtt_seconds_count\{host="loopback\.test"\} (\S+)$', re.M)
-text = ''
-for _ in range(40):
-    time.sleep(0.5)
-    try:
-        text = urllib.request.urlopen(
-            'http://127.0.0.1:13110/metrics', timeout=5).read().decode()
-    except OSError:
-        continue
-    found = wanted.search(text)
-    if found and float(found.group(1)) >= 3:
-        print('pingerd: %s answers from 127.0.0.1 counted' % found.group(1))
-        break
-else:
-    sys.exit('pingerd: no answers counted in 20 s; it said:\n' + text[-2000:])
-if 'no-address.test' in text:
-    sys.exit('pingerd: a host without an address was measured')
-EOF
+python3 -B tests/measured.py 13110 \
+    --counted a.here.test b.there.test \
+    --never no-address.here.test || { stop; exit 1; }
 # it gave up root once the socket was open
 uid=$(awk '/^Uid:/ {print $2}' "/proc/$daemon/status")
 echo "pingerd runs as uid $uid (nobody is $(id -u nobody))"
 test "$uid" = "$(id -u nobody)" || { stop; exit 1; }
+stop
+
+# one site only, from a database named on the command line
+/usr/sbin/pingerd --port 13111 --interval 0.5 \
+    --database /tmp/plan.db --site here &
+daemon=$!
+python3 -B tests/measured.py 13111 \
+    --counted a.here.test \
+    --never b.there.test no-address.here.test || { stop; exit 1; }
 stop
 
 # 3. and it goes away again

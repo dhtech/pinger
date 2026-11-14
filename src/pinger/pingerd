@@ -22,22 +22,36 @@ DEFAULT_ICMP_BUCKETS=(
 icmp_rtt = None
 
 
-def plan_hosts():
-  """{IPv4 address: name} of the plan's hosts that have an address."""
-  db = sqlite3.connect('/etc/ipplan.db')
+def site_of(network):
+  """The site a network of the plan belongs to: its name is SITE@NAME."""
+  return (network or '').split('@', 1)[0].upper()
+
+
+def plan_hosts(database, sites=()):
+  """{IPv4 address: name} of the plan's hosts that have an address.
+
+  With SITES (upper case), only the hosts on a network of one of them.
+  """
+  db = sqlite3.connect(database)
   try:
-    sql = ("SELECT name, ipv4_addr_txt FROM host WHERE ipv4_addr_txt IS NOT NULL")
-    return {ipv4: host for host, ipv4 in db.execute(sql).fetchall()}
+    if not sites:
+      sql = ("SELECT name, ipv4_addr_txt FROM host WHERE ipv4_addr_txt IS NOT NULL")
+      return {ipv4: host for host, ipv4 in db.execute(sql).fetchall()}
+    sql = ("SELECT h.name, h.ipv4_addr_txt, n.name FROM host h "
+           "JOIN network n ON n.node_id = h.network_id "
+           "WHERE h.ipv4_addr_txt IS NOT NULL")
+    return {ipv4: host for host, ipv4, network in db.execute(sql).fetchall()
+            if site_of(network) in sites}
   finally:
     db.close()
 
 
-def transmit(interval, hosts, sockfd):
+def transmit(interval, hosts, sockfd, database, sites):
   while True:
     # Mark current time as the datapoint time
     timestamp = int(time.time())
     try:
-      hosts.update(plan_hosts())
+      hosts.update(plan_hosts(database, sites))
     except sqlite3.Error as error:
       # a plan that cannot be read this round (it is being replaced,
       # say): the hosts known so far are pinged, and it is read again
@@ -57,7 +71,7 @@ def transmit(interval, hosts, sockfd):
     time.sleep(interval)
 
 
-def main(port, interval):
+def main(port, interval, database='/etc/ipplan.db', sites=()):
   sockfd = dhmonpinger.create_socket()
 
   os.nice(-15)
@@ -73,7 +87,7 @@ def main(port, interval):
   hosts = {}
 
   transmit_thread = threading.Thread(
-      target=transmit, args=(interval, hosts, sockfd))
+      target=transmit, args=(interval, hosts, sockfd, database, sites))
   transmit_thread.daemon = True
   transmit_thread.start()
 
@@ -100,8 +114,23 @@ if __name__ == '__main__':
   parser.add_argument(
       '-b', '--bucket', action='append', dest='bucket',
       default=DEFAULT_ICMP_BUCKETS, help='set ICMP RTT buckets')
+  parser.add_argument(
+      '-d', '--database', default='/etc/ipplan.db',
+      help='the plan database (default: %(default)s)')
+  parser.add_argument(
+      '-s', '--site', action='append', dest='sites', default=[],
+      metavar='SITE',
+      help='ping only the hosts of this site of the plan - the part of '
+           'their network\'s name before the @, as EVENT in EVENT@TECH-SRV-A. '
+           'May be given several times, or as a list with commas. '
+           'Default: the hosts of every site')
   args = parser.parse_args()
+  sites = frozenset(
+      site.strip().upper() for given in args.sites
+      for site in given.split(',') if site.strip())
+  if sites:
+    print('Only the sites: %s' % ', '.join(sorted(sites)))
 
   icmp_rtt = prometheus.Histogram(
       'icmp_rtt_seconds', 'ICMP RTT', ('host', ), buckets=args.bucket)
-  main(args.port, args.interval)
+  main(args.port, args.interval, args.database, sites)

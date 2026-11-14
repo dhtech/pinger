@@ -7,6 +7,12 @@ took, for Prometheus.
   has an IPv4 address. The database is read again for every round, so
   new hosts are picked up without a restart; a host that has left the
   plan is pinged until the next restart.
+- **One site only:** `--site SITE` (several times, or `--site A,B`)
+  keeps it to the hosts of those sites of the plan. A host's site is
+  the part of its network's name before the `@` - `EVENT` in
+  `EVENT@TECH-SRV-A`; upper or lower case is the same. Without the
+  switch it pings every site's hosts, as it always has.
+- **Another database:** `--database FILE`.
 - **How often:** once a second (`--interval`).
 - **What it says:** the histogram `icmp_rtt_seconds`, one per host
   (label `host`), on `http://<server>:13110/metrics` (`--port`). A host
